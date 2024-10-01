@@ -5,8 +5,8 @@ import (
 	"log/slog"
 	"time"
 
-	"gitlab.inf.ethz.ch/PRV-PERRIG/netsec-course/project-acme/netsec-2024-acme/netzuser-acme-project/dns01"
-	"gitlab.inf.ethz.ch/PRV-PERRIG/netsec-course/project-acme/netsec-2024-acme/netzuser-acme-project/http01"
+	"gitlab.inf.ethz.ch/PRV-PERRIG/netsec-course/project-acme/netsec-2024-acme/akrivka-acme-project/dns01"
+	"gitlab.inf.ethz.ch/PRV-PERRIG/netsec-course/project-acme/netsec-2024-acme/akrivka-acme-project/http01"
 )
 
 func main() {
@@ -22,6 +22,7 @@ func main() {
 	// Prevent shutdown from being executed beofre the dns/http servers actually start
 	time.Sleep(1 * time.Second)
 
+	// Stop all servers
 	if err := http01.Server.Shutdown(context.Background()); err != nil {
 		slog.Error("Error while stopping the http01 server", "err", err)
 	}
