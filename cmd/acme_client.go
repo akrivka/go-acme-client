@@ -10,6 +10,8 @@ import (
 )
 
 func main() {
+	slog.Info("Starting the ACME client")
+
 	// Hint: You may want to start by parsing command line arguments and
 	// perform some sanity checks first. The built-in `argparse` library will suffice.
 
