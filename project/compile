@@ -1,0 +1,3 @@
+#!/bin/sh
+
+go build -o acme_client cmd/acme_client.go
