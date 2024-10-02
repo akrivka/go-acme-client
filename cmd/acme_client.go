@@ -35,9 +35,9 @@ var server ACMEServer
 
 // Command-line arguments configuration for go-flags
 var opts struct {
-	Directory   string   `long:"dir" description:"Directory URL of the ACME Server"`
-	IPV4Address string   `long:"record" description:"IPv4 address to be returned by the DNS server"`
-	Domains     []string `long:"domain" description:"Domain for which to request certificate. Can have multiple --domain flags for multiple domains."`
+	Directory   string   `long:"dir" description:"Directory URL of the ACME Server" required:"true"`
+	IPV4Address string   `long:"record" description:"IPv4 address to be returned by the DNS server" required:"true"`
+	Domains     []string `long:"domain" description:"Domain for which to request certificate. Can have multiple --domain flags for multiple domains." required:"true"`
 	Revoke      bool     `long:"revoke" description:"Should we revoke certificate after obtaining it"`
 }
 
@@ -47,17 +47,22 @@ func main() {
 	// Check validity of the challenge type
 	challengeType = os.Args[1]
 	if !(challengeType == ChallengeHTTP01 || challengeType == ChallengeDNS01) {
-		slog.Error("Invalid challenge type (http01 | dns01)")
+		slog.Error("Invalid challenge type (http01 | dns01)\n")
+		os.Exit(1)
 	}
 
 	// Parse the remaining arguments
-	flags.ParseArgs(&opts, os.Args[2:])
+	_, err := flags.ParseArgs(&opts, os.Args[2:])
+	if err != nil {
+		slog.Error("Failed to parse command-line arguments", "message", err.Error())
+		os.Exit(1)
+	}
 
 	// Start both challenge servers (doesn't really matter that we only use one)
 	go http01.HTTP01()
 	go dns01.DNS01()
 
-	// Prevent shutdown from being executed beofre the dns/http servers actually start
+	// Wait a little bit for the servers to start
 	time.Sleep(1 * time.Second)
 
 	// Stop all servers
