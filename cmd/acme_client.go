@@ -42,6 +42,9 @@ var challengeType string
 // Our ACME Server (currently we do not support trying multiple servers)
 var server ACMEServer
 
+// Next nonce to use from last server response
+var nextNonce string
+
 // Command-line arguments configuration for go-flags
 var opts struct {
 	Directory   string   `long:"dir" description:"Directory URL of the ACME Server" required:"true"`
@@ -102,6 +105,14 @@ func main() {
 		slog.Error("Failed to parse ACME server directory", "error", err)
 		os.Exit(1)
 	}
+
+	// Request our first nonce and save it
+	res, err = client.Head(server.Directory.NewNonce)
+	if err != nil {
+		slog.Error("Failed to get first nonce", "error", err)
+		os.Exit(1)
+	}
+	nextNonce = res.Header["Replay-Nonce"][0]
 
 	// Start both challenge servers (doesn't really matter that we only use one)
 	go http01.HTTP01()
