@@ -2,7 +2,12 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/json"
+	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"time"
 
@@ -11,14 +16,18 @@ import (
 	"gitlab.inf.ethz.ch/PRV-PERRIG/netsec-course/project-acme/netsec-2024-acme/akrivka-acme-project/http01"
 )
 
-// List of urls describing the ACME server
+// ACME server's directory
+type ACMEDirectory struct {
+	NewNonce   string `json:"newNonce"`
+	NewAccount string `json:"newAccount"`
+	NewOrder   string `json:"newOrder"`
+	NewAuthz   string `json:"newAuthz"`
+	RevokeCert string `json:"revokeCert"`
+	KeyChange  string `json:"keyChange"`
+}
+
 type ACMEServer struct {
-	newNonce   string
-	newAccount string
-	newOrder   string
-	newAuthz   string
-	revokeCert string
-	keyChange  string
+	Directory ACMEDirectory
 }
 
 // Types of challenges
@@ -39,6 +48,7 @@ var opts struct {
 	IPV4Address string   `long:"record" description:"IPv4 address to be returned by the DNS server" required:"true"`
 	Domains     []string `long:"domain" description:"Domain for which to request certificate. Can have multiple --domain flags for multiple domains." required:"true"`
 	Revoke      bool     `long:"revoke" description:"Should we revoke certificate after obtaining it"`
+	CACert      string   `long:"cert" description:"Path to the CA certificate of the ACME server (added for local debugging with Pebble)" default:"project/pebble.minica.pem"`
 }
 
 func main() {
@@ -47,7 +57,7 @@ func main() {
 	// Check validity of the challenge type
 	challengeType = os.Args[1]
 	if !(challengeType == ChallengeHTTP01 || challengeType == ChallengeDNS01) {
-		slog.Error("Invalid challenge type (http01 | dns01)\n")
+		slog.Error("Invalid challenge type (http01 | dns01)")
 		os.Exit(1)
 	}
 
@@ -55,6 +65,41 @@ func main() {
 	_, err := flags.ParseArgs(&opts, os.Args[2:])
 	if err != nil {
 		slog.Error("Failed to parse command-line arguments", "message", err.Error())
+		os.Exit(1)
+	}
+
+	// Install ACME server's public certificate
+	caCert, err := os.ReadFile(opts.CACert)
+	if err != nil {
+		slog.Error("Failed to read ACME server's CA certificate", "error", err)
+	}
+	caCertPool := x509.NewCertPool()
+	caCertPool.AppendCertsFromPEM(caCert)
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				RootCAs: caCertPool,
+			},
+		},
+	}
+
+	// Fetch the directory endpoint and save the urls
+	res, err := client.Get(opts.Directory)
+	if err != nil {
+		slog.Error("Failed to fetch the ACME server directory", "error", err)
+		os.Exit(1)
+	}
+
+	resBody, err := io.ReadAll(res.Body)
+	if err != nil {
+		slog.Error("Failed to read ACME server directory", "error", err)
+		os.Exit(1)
+	}
+
+	err = json.Unmarshal(resBody, &server.Directory)
+	if err != nil {
+		slog.Error("Failed to parse ACME server directory", "error", err)
 		os.Exit(1)
 	}
 
