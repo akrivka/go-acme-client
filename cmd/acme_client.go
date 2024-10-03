@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -17,6 +18,12 @@ import (
 	"gitlab.inf.ethz.ch/PRV-PERRIG/netsec-course/project-acme/netsec-2024-acme/akrivka-acme-project/dns01"
 	"gitlab.inf.ethz.ch/PRV-PERRIG/netsec-course/project-acme/netsec-2024-acme/akrivka-acme-project/http01"
 )
+
+func panicIfError(err error) {
+	if err != nil {
+		panic(err)
+	}
+}
 
 // ACME server's directory
 type ACMEDirectory struct {
@@ -108,9 +115,7 @@ func initACMEServer() error {
 	}
 
 	resBody, err := io.ReadAll(res.Body)
-	if err != nil {
-		return fmt.Errorf("failed to read directory response body (%s)", err.Error())
-	}
+	panicIfError(err)
 
 	err = json.Unmarshal(resBody, &server.Directory)
 	if err != nil {
@@ -123,6 +128,65 @@ func initACMEServer() error {
 		return fmt.Errorf("failed to get first nonce (%s)", err.Error())
 	}
 	server.NextNonce = res.Header["Replay-Nonce"][0]
+
+	return nil
+}
+
+// TODOC
+type ACMESigner struct {
+	Wrapped http.RoundTripper
+}
+
+func (art ACMESigner) RoundTrip(req *http.Request) (res *http.Response, e error) {
+	// do something before request
+	res, err := art.Wrapped.RoundTrip(req)
+	if err != nil {
+
+	}
+	return res, nil
+}
+
+// TODOC
+func doAcmePost(client *http.Client, url string, payload []byte, desiredStatus int) ([]byte, error) {
+	res, err := client.Post(url, "application/jose+json", bytes.NewBuffer(payload))
+	if err != nil {
+		return nil, err
+	}
+	defer res.Body.Close()
+
+	resBody, err := io.ReadAll(res.Body)
+	panicIfError(err)
+
+	if res.StatusCode != desiredStatus {
+		var acmeProblem ACMEProblem
+		err := json.Unmarshal(resBody, &acmeProblem)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read problem document (%s)", err.Error())
+		} else {
+			slog.Error("ACME problem", "type", acmeProblem.Type, "detail", acmeProblem.Detail)
+			return nil, errors.New("logged ACME problem")
+		}
+	}
+	return resBody, nil
+}
+
+// TODOC
+func obtainCertificate() error {
+	TLSTransport := &http.Transport{
+		TLSClientConfig: &tls.Config{
+			RootCAs: serverCACertPool,
+		},
+	}
+	client := &http.Client{
+		Transport: ACMESigner{TLSTransport},
+	}
+
+	// Create new account
+	payload := []byte(`hello world`)
+	_, err := doAcmePost(client, server.Directory.NewAccount, payload, http.StatusCreated)
+	if err != nil {
+		return fmt.Errorf("failed to create new account (%s)", err.Error())
+	}
 
 	return nil
 }
@@ -145,12 +209,20 @@ func main() {
 		os.Exit(1)
 	}
 
+	slog.Info("ACME Server connection initialized")
+
 	// Start both challenge servers (doesn't really matter that we only use one)
+	slog.Info("Starting challenge servers")
 	go http01.HTTP01()
 	go dns01.DNS01()
 
-	// Wait a little bit for the servers to start
+	// Wait a little bit for the servers to start...
 	time.Sleep(1 * time.Second)
+
+	if err := obtainCertificate(); err != nil {
+		slog.Error("Failed to obtain certificate", "error", err.Error())
+		os.Exit(1)
+	}
 
 	// Stop all servers
 	if err := http01.Server.Shutdown(context.Background()); err != nil {
