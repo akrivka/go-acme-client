@@ -25,6 +25,8 @@ func panicIfError(err error) {
 	}
 }
 
+type Empty struct{}
+
 // ACME server's directory URLs
 type ACMEDirectory struct {
 	NewNonce   string `json:"newNonce"`
@@ -49,8 +51,8 @@ var client *http.Client
 
 // Types of challenges
 const (
-	ChallengeHTTP01 = "http01"
-	ChallengeDNS01  = "dns01"
+	ChallengeHTTP01 = "http"
+	ChallengeDNS01  = "dns"
 )
 
 // Command-line arguments configuration for go-flags
@@ -63,6 +65,8 @@ var opts struct {
 	CACert        string   `long:"cert" description:"Path to the CA certificate of the ACME server (added for local debugging with Pebble)" default:"project/pebble.minica.pem"`
 }
 
+var validReceived chan bool
+
 // Parse command line arguments and store them in `opts` and `challengeType`
 func parseCmdArgs() error {
 	if len(os.Args) < 2 {
@@ -70,7 +74,8 @@ func parseCmdArgs() error {
 	}
 
 	// parse challenge type
-	opts.ChallengeType = os.Args[1]
+	chalType := os.Args[1]
+	opts.ChallengeType = chalType[:len(chalType)-2]
 	if !(opts.ChallengeType == ChallengeHTTP01 || opts.ChallengeType == ChallengeDNS01) {
 		return errors.New("invalid challenge type (http01 | dns01)")
 	}
@@ -140,11 +145,17 @@ func initACMEServer() error {
 // important stuff there)
 func doAcmePost(url string, payload any, desiredStatus int) ([]byte, string, error) {
 	// Prepare message
-	payloadJson, err := json.Marshal(payload)
-	if err != nil {
-		return nil, "", err
+	var payloadJson []byte
+	var err error
+	if payload != "" {
+		payloadJson, err = json.Marshal(payload)
+		if err != nil {
+			return nil, "", err
+		}
+	} else {
+		payloadJson = []byte("")
 	}
-	messageJws, err := acmeJwsSignJwk(payloadJson, url, server.NextNonce)
+	messageJws, err := acmeJwsSign(payloadJson, url, server.NextNonce)
 	if err != nil {
 		return nil, "", err
 	}
@@ -171,7 +182,12 @@ func doAcmePost(url string, payload any, desiredStatus int) ([]byte, string, err
 	}
 	server.NextNonce = res.Header["Replay-Nonce"][0] // Save replace nonce!
 
-	return resBody, res.Header["Location"][0], nil
+	var location string
+	if len(res.Header["Location"]) > 0 {
+		location = res.Header["Location"][0]
+	}
+
+	return resBody, location, nil
 }
 
 // Obtain CA certificate for specified domains
@@ -179,17 +195,123 @@ func obtainCertificate() error {
 	// Initialize JOSE (generate key pair)
 	acmeJoseInit()
 
-	// Create new account
-	_, account, err := doAcmePost(
+	// Create new accountUrl
+	_, accountUrl, err := doAcmePost(
 		server.Directory.NewAccount,
 		ACMEMsg_NewAccount{true, []string{"mailto:akrivka@student.ethz.ch"}},
 		http.StatusCreated)
 	if err != nil {
 		return fmt.Errorf("failed to create new account (%s)", err.Error())
 	}
-	slog.Info("Created account", "url", account)
+	acmeJoseSetKid(accountUrl)
+	slog.Info("Created account", "url", accountUrl)
 
 	// Create new order
+	var identifiers []ACMEIdentifier
+	for _, domain := range opts.Domains {
+		identifiers = append(identifiers, ACMEIdentifier{Type: "dns", Value: domain})
+	}
+	resBody, orderUrl, err := doAcmePost(
+		server.Directory.NewOrder,
+		ACMEMsg_NewOrder{identifiers, "", ""},
+		http.StatusCreated)
+	if err != nil {
+		return fmt.Errorf("failed to submit order (%s)", err.Error())
+	}
+	slog.Info("Created order", "url", orderUrl)
+
+	var order ACMEOrder
+	err = json.Unmarshal(resBody, &order)
+	if err != nil {
+		return fmt.Errorf("failed to read order (%s)", err.Error())
+	}
+
+	// Fetch authorizations and respond to challenges
+	slog.Info("Fetching authorizations and responding to challenges")
+	for _, authzUrl := range order.Authorizations {
+		resBody, _, err := doAcmePost(
+			authzUrl,
+			"",
+			http.StatusOK)
+		if err != nil {
+			return fmt.Errorf("failed to fetch authorizations (%s)", err.Error())
+		}
+
+		var authz ACMEAuthorization
+		err = json.Unmarshal(resBody, &authz)
+		if err != nil {
+			return fmt.Errorf("failed to read authorization (%s)", err.Error())
+		}
+
+		// Respond to challenges
+		var numChall int = 0
+		for _, chall := range authz.Challenges {
+			if chall.Type == opts.ChallengeType+"-01" {
+				numChall += 1
+
+				// Provision key authorizaiton in appropriate challenge server
+				http01.InstallResource(chall.Token, acmeKeyAuthz(chall.Token))
+
+				_, _, err := doAcmePost(
+					chall.Url,
+					Empty{},
+					http.StatusOK)
+				if err != nil {
+					return fmt.Errorf("failed to indicate challenge (%s)", err.Error())
+				}
+			}
+		}
+
+		// Wait to receive first validation request
+		for numChall > 0 {
+			<-validReceived
+			numChall -= 1
+		}
+
+		// Poll for status (this could be done in a separate loop
+		// for better time efficiency probably but it's not rly
+		// worth it here...)
+		for authz.Status != "valid" {
+			resBody, _, err = doAcmePost(
+				authzUrl,
+				"",
+				http.StatusOK)
+			if err != nil {
+				return fmt.Errorf("failed to fetch authorizations (%s)", err.Error())
+			}
+
+			err = json.Unmarshal(resBody, &authz)
+			if err != nil {
+				return fmt.Errorf("failed to read authorization (%s)", err.Error())
+			}
+
+			// Should ideally use the Retry-After
+			// header here but I'm lazy
+			time.Sleep(1 * time.Second)
+		}
+	}
+
+	// Check that the order is ready
+	resBody, _, err = doAcmePost(
+		orderUrl,
+		"",
+		http.StatusOK)
+	if err != nil {
+		return fmt.Errorf("failed to check order (%s)", err.Error())
+	}
+
+	err = json.Unmarshal(resBody, &order)
+	if err != nil {
+		return fmt.Errorf("failed to read order (%s)", err.Error())
+	}
+
+	if order.Status != "ready" {
+		return fmt.Errorf("all authzs were valid but somehow order wasn't ready ;(")
+	}
+
+	slog.Info("Order is ready!")
+
+	// Finalize order
 	// TODO
 
 	return nil
@@ -217,8 +339,11 @@ func main() {
 
 	// Start both challenge servers (doesn't really matter that we only use one)
 	slog.Info("Starting HTTP-01 and DNS-01 challenge servers")
-	go http01.HTTP01()
-	go dns01.DNS01()
+
+	validReceived = make(chan bool, 20)
+
+	go http01.HTTP01(validReceived)
+	go dns01.DNS01(opts.IPV4Address)
 
 	// Wait a little bit for the servers to start...
 	time.Sleep(1 * time.Second)

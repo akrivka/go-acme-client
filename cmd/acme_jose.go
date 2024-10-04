@@ -38,6 +38,7 @@ type RSAPublicKey struct {
 // RS256 private-public key pair
 var jwkPrivate *rsa.PrivateKey
 var jwkPublic RSAPublicKey
+var jwkThumbprint string
 
 // Account id
 var acmeKid string
@@ -51,11 +52,11 @@ type JWS struct {
 
 // JWS Protected Header
 type JWSProtected struct {
-	Alg   string       `json:"alg"`
-	Jwk   RSAPublicKey `json:"jwk,omitempty"`
-	Kid   string       `json:"kid,omitempty"`
-	Nonce string       `json:"nonce"`
-	Url   string       `json:"url"`
+	Alg   string        `json:"alg"`
+	Jwk   *RSAPublicKey `json:"jwk,omitempty"`
+	Kid   string        `json:"kid,omitempty"`
+	Nonce string        `json:"nonce"`
+	Url   string        `json:"url"`
 }
 
 // Generate a key pair
@@ -68,6 +69,18 @@ func acmeJoseInit() {
 	bs := make([]byte, 4)
 	binary.BigEndian.PutUint32(bs, uint32(privateKey.PublicKey.E))
 	jwkPublic = RSAPublicKey{"RSA", base64url(privateKey.PublicKey.N.Bytes()), base64url(bytes.Trim(bs, "\x00"))}
+	var jwkPublicLexi struct {
+		E   string `json:"e"`
+		Kty string `json:"kty"`
+		N   string `json:"n"`
+	}
+	jwkPublicLexi.E = jwkPublic.E
+	jwkPublicLexi.Kty = jwkPublic.Kty
+	jwkPublicLexi.N = jwkPublic.N
+	jwkPublicJson, err := json.Marshal(jwkPublicLexi)
+	panicIfError(err)
+	hashed := sha256.Sum256(jwkPublicJson)
+	jwkThumbprint = base64url(hashed[:])
 }
 
 // Set account key id
@@ -79,18 +92,21 @@ func acmeJoseSetKid(newKid string) {
 }
 
 // Helper for acmeJwsSignJwk and acmeJwsSignKid
-func acmeJwsSign(payload []byte, url string, nonce string, typ string) ([]byte, error) {
+func acmeJwsSign(payload []byte, url string, nonce string) ([]byte, error) {
+	var payload64 string
+	if string(payload) != "" {
+		payload64 = base64url(payload)
+	}
 	// Construct protected header
 	var protected JWSProtected
-	switch typ {
-	case "jwk":
+	if acmeKid == "" {
 		protected = JWSProtected{
 			Alg:   Alg,
-			Jwk:   jwkPublic,
+			Jwk:   &jwkPublic,
 			Nonce: nonce,
 			Url:   url,
 		}
-	case "kid":
+	} else {
 		protected = JWSProtected{
 			Alg:   Alg,
 			Kid:   acmeKid,
@@ -104,7 +120,7 @@ func acmeJwsSign(payload []byte, url string, nonce string, typ string) ([]byte, 
 	}
 
 	// Compute signature
-	signingInput := fmt.Sprintf("%s.%s", base64url(protectedJson), base64url(payload))
+	signingInput := fmt.Sprintf("%s.%s", base64url(protectedJson), payload64)
 	hashed := sha256.Sum256([]byte(signingInput))
 	signature, err := rsa.SignPKCS1v15(nil, jwkPrivate, crypto.SHA256, hashed[:])
 	if err != nil {
@@ -112,8 +128,7 @@ func acmeJwsSign(payload []byte, url string, nonce string, typ string) ([]byte, 
 	}
 
 	// Construct JWS object
-	acmeJws := JWS{base64url(protectedJson), base64url(payload), base64url(signature)}
-
+	acmeJws := JWS{base64url(protectedJson), payload64, base64url(signature)}
 	// Encode it as JSON and return
 	jwsJson, err := json.Marshal(acmeJws)
 	if err != nil {
@@ -122,12 +137,6 @@ func acmeJwsSign(payload []byte, url string, nonce string, typ string) ([]byte, 
 	return jwsJson, nil
 }
 
-// Wrap payload in a signed JWS object using jwk in the protected header
-func acmeJwsSignJwk(payload []byte, url string, nonce string) ([]byte, error) {
-	return acmeJwsSign(payload, url, nonce, "jwk")
-}
-
-// Wrap payload in a signed JWS object using kid in the protected header
-func acmeJwsSignKid(payload []byte, url string, nonce string) ([]byte, error) {
-	return acmeJwsSign(payload, url, nonce, "kid")
+func acmeKeyAuthz(token string) string {
+	return fmt.Sprintf("%s.%s", token, jwkThumbprint)
 }
