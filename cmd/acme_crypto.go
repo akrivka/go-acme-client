@@ -18,6 +18,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 )
 
@@ -147,7 +148,7 @@ func acmeKeyAuthz(token string) string {
 	return fmt.Sprintf("%s.%s", token, accountThumbprint)
 }
 
-func generateCsr(domains []string) ([]byte, *rsa.PrivateKey, error) {
+func generateCsr(domains []string) ([]byte, []byte, error) {
 	// Generate new private/public key pair
 	priv, err := rsa.GenerateKey(rand.Reader, 2048)
 	panicIfError(err)
@@ -168,8 +169,18 @@ func generateCsr(domains []string) ([]byte, *rsa.PrivateKey, error) {
 
 		DNSNames: domains,
 	}
-	// Return certificate as well as the private key
+	// Return certificate as well as the private key certificate
 	// so that the client can install it in the appropriate http server
 	csr, err := x509.CreateCertificateRequest(rand.Reader, &csrTemplate, priv)
-	return csr, priv, err
+	panicIfError(err)
+	keyByte, err := x509.MarshalPKCS8PrivateKey(priv)
+	keyBlock := pem.Block{
+		Type:    "PRIVATE KEY",
+		Headers: nil,
+		Bytes:   keyByte,
+	}
+	keyPEM := pem.EncodeToMemory(&keyBlock)
+	panicIfError(err)
+
+	return csr, keyPEM, err
 }

@@ -17,6 +17,7 @@ import (
 	"github.com/jessevdk/go-flags"
 	"gitlab.inf.ethz.ch/PRV-PERRIG/netsec-course/project-acme/netsec-2024-acme/akrivka-acme-project/dns01"
 	"gitlab.inf.ethz.ch/PRV-PERRIG/netsec-course/project-acme/netsec-2024-acme/akrivka-acme-project/http01"
+	myserver "gitlab.inf.ethz.ch/PRV-PERRIG/netsec-course/project-acme/netsec-2024-acme/akrivka-acme-project/my-server"
 )
 
 func panicIfError(err error) {
@@ -190,8 +191,8 @@ func doAcmePost(url string, payload any, desiredStatus int) ([]byte, string, err
 	return resBody, location, nil
 }
 
-// Obtain CA certificate for specified domains
-func obtainCertificate() error {
+// Obtain CA certificates for specified domains
+func obtainCertificates() ([]byte, []byte, error) {
 	// Initialize JOSE (generate key pair)
 	acmeJoseInit()
 
@@ -201,7 +202,7 @@ func obtainCertificate() error {
 		ACMEMsg_NewAccount{true, []string{"mailto:" + MyEmailAddress}},
 		http.StatusCreated)
 	if err != nil {
-		return fmt.Errorf("failed to create new account (%s)", err.Error())
+		return nil, nil, fmt.Errorf("failed to create new account (%s)", err.Error())
 	}
 	acmeJoseSetKid(accountUrl)
 	slog.Info("Created account", "url", accountUrl)
@@ -216,14 +217,14 @@ func obtainCertificate() error {
 		ACMEMsg_NewOrder{identifiers, "", ""},
 		http.StatusCreated)
 	if err != nil {
-		return fmt.Errorf("failed to submit order (%s)", err.Error())
+		return nil, nil, fmt.Errorf("failed to submit order (%s)", err.Error())
 	}
 	slog.Info("Created order", "url", orderUrl)
 
 	var order ACMEOrder
 	err = json.Unmarshal(resBody, &order)
 	if err != nil {
-		return fmt.Errorf("failed to read order (%s)", err.Error())
+		return nil, nil, fmt.Errorf("failed to read order (%s)", err.Error())
 	}
 
 	// Fetch authorizations and respond to challenges
@@ -234,13 +235,13 @@ func obtainCertificate() error {
 			"",
 			http.StatusOK)
 		if err != nil {
-			return fmt.Errorf("failed to fetch authorizations (%s)", err.Error())
+			return nil, nil, fmt.Errorf("failed to fetch authorizations (%s)", err.Error())
 		}
 
 		var authz ACMEAuthorization
 		err = json.Unmarshal(resBody, &authz)
 		if err != nil {
-			return fmt.Errorf("failed to read authorization (%s)", err.Error())
+			return nil, nil, fmt.Errorf("failed to read authorization (%s)", err.Error())
 		}
 
 		// Respond to challenges
@@ -257,7 +258,7 @@ func obtainCertificate() error {
 					Empty{},
 					http.StatusOK)
 				if err != nil {
-					return fmt.Errorf("failed to indicate challenge (%s)", err.Error())
+					return nil, nil, fmt.Errorf("failed to indicate challenge (%s)", err.Error())
 				}
 			}
 		}
@@ -277,12 +278,12 @@ func obtainCertificate() error {
 				"",
 				http.StatusOK)
 			if err != nil {
-				return fmt.Errorf("failed to fetch authorizations (%s)", err.Error())
+				return nil, nil, fmt.Errorf("failed to fetch authorizations (%s)", err.Error())
 			}
 
 			err = json.Unmarshal(resBody, &authz)
 			if err != nil {
-				return fmt.Errorf("failed to read authorization (%s)", err.Error())
+				return nil, nil, fmt.Errorf("failed to read authorization (%s)", err.Error())
 			}
 
 			// Should ideally use the Retry-After
@@ -297,31 +298,31 @@ func obtainCertificate() error {
 		"",
 		http.StatusOK)
 	if err != nil {
-		return fmt.Errorf("failed to check order (%s)", err.Error())
+		return nil, nil, fmt.Errorf("failed to check order (%s)", err.Error())
 	}
 
 	err = json.Unmarshal(resBody, &order)
 	if err != nil {
-		return fmt.Errorf("failed to read order (%s)", err.Error())
+		return nil, nil, fmt.Errorf("failed to read order (%s)", err.Error())
 	}
 
 	if order.Status != "ready" {
-		return fmt.Errorf("all authzs were valid but somehow order wasn't ready ;(")
+		return nil, nil, fmt.Errorf("all authzs were valid but somehow order wasn't ready ;(")
 	}
 
 	slog.Info("Order is ready! Finalizing it...")
 
 	// Finalize order
-	csr, _, err := generateCsr(opts.Domains)
+	csr, keyPEM, err := generateCsr(opts.Domains)
 	if err != nil {
-		return fmt.Errorf("failed to generate csr (%s)", err)
+		return nil, nil, fmt.Errorf("failed to generate csr (%s)", err)
 	}
-	resBody, _, err = doAcmePost(
+	_, _, err = doAcmePost(
 		order.Finalize,
 		ACMEMsg_Finalize{base64url(csr)},
 		http.StatusOK)
 	if err != nil {
-		return fmt.Errorf("failed to finalize order (%s)", err)
+		return nil, nil, fmt.Errorf("failed to finalize order (%s)", err)
 	}
 
 	for order.Status != "valid" {
@@ -334,28 +335,26 @@ func obtainCertificate() error {
 			"",
 			http.StatusOK)
 		if err != nil {
-			return fmt.Errorf("failed to check order (%s)", err.Error())
+			return nil, nil, fmt.Errorf("failed to check order (%s)", err.Error())
 		}
 		err = json.Unmarshal(resBody, &order)
 		if err != nil {
-			return fmt.Errorf("failed to read order (%s)", err.Error())
+			return nil, nil, fmt.Errorf("failed to read order (%s)", err.Error())
 		}
 	}
 
 	slog.Info("Order is valid! Downloading certificate...")
 
 	// Download certificate
-	resBody, _, err = doAcmePost(
+	certPEM, _, err := doAcmePost(
 		order.Certificate,
 		"",
 		http.StatusOK)
 	if err != nil {
-		return fmt.Errorf("failed to download certificate (%s)", err.Error())
+		return nil, nil, fmt.Errorf("failed to download certificate (%s)", err.Error())
 	}
 
-	fmt.Printf("%s\n", resBody)
-
-	return nil
+	return certPEM, keyPEM, nil
 }
 
 func main() {
@@ -390,16 +389,27 @@ func main() {
 	time.Sleep(1 * time.Second)
 
 	slog.Info("Trying to obtain a certificate")
-	if err := obtainCertificate(); err != nil {
+	certPEM, keyPEM, err := obtainCertificates()
+	if err != nil {
 		slog.Error("Failed to obtain certificate", "error", err.Error())
 		os.Exit(1)
 	}
+
+	slog.Info("Certificates obtained!")
+	fmt.Printf("%s\n%s\n", certPEM, keyPEM)
+	go myserver.RunServer(opts.IPV4Address, certPEM, keyPEM)
+
+	// TESTING
+	time.Sleep(100 * time.Second)
 
 	// Stop all servers
 	if err := http01.Server.Shutdown(context.Background()); err != nil {
 		slog.Error("Error while stopping the http01 server", "err", err)
 	}
 	if err := dns01.Server.Shutdown(); err != nil {
+		slog.Error("Error while stopping the dns01 server", "err", err)
+	}
+	if err := myserver.Server.Shutdown(context.Background()); err != nil {
 		slog.Error("Error while stopping the dns01 server", "err", err)
 	}
 }
