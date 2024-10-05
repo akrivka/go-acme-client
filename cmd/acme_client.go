@@ -394,13 +394,23 @@ func main() {
 		slog.Error("Failed to obtain certificate", "error", err.Error())
 		os.Exit(1)
 	}
-
 	slog.Info("Certificates obtained!")
-	fmt.Printf("%s\n%s\n", certPEM, keyPEM)
+
+	// Start Certificate HTTPS server
+	slog.Info("Starting Certificate HTTPS")
 	go myserver.RunServer(opts.IPV4Address, certPEM, keyPEM)
 
-	// TESTING
-	time.Sleep(100 * time.Second)
+	// Start shutdown server
+	shutdownServer := &http.Server{
+		Addr: opts.IPV4Address + ":5003",
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			os.Exit(1)
+		}),
+	}
+	slog.Info("Starting Shutdown server")
+	if err := shutdownServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		slog.Error("Could not start shutdown server", "err", err)
+	}
 
 	// Stop all servers
 	if err := http01.Server.Shutdown(context.Background()); err != nil {
