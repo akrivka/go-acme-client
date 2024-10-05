@@ -342,7 +342,7 @@ func main() {
 
 	validReceived = make(chan bool, 20)
 
-	go http01.HTTP01(validReceived)
+	go http01.HTTP01(opts.IPV4Address, validReceived)
 	go dns01.DNS01(opts.IPV4Address)
 
 	// Wait a little bit for the servers to start...

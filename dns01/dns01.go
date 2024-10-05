@@ -31,7 +31,7 @@ func DNS01(_record string) {
 	record = _record
 
 	Server = &dns.Server{
-		Addr:    "0.0.0.0:10053",
+		Addr:    record + ":10053",
 		Net:     "udp",
 		Handler: dns.HandlerFunc(handler),
 	}

@@ -32,12 +32,12 @@ func InstallResource(token string, keyAuthz string) {
 
 var Server *http.Server
 
-func HTTP01(_validReceived chan bool) {
+func HTTP01(record string, _validReceived chan bool) {
 	challResources = make(map[string]string)
 	validReceived = _validReceived
 
 	Server = &http.Server{
-		Addr:    "localhost:5002",
+		Addr:    record + ":5002",
 		Handler: http.HandlerFunc(handler),
 	}
 	if err := Server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
