@@ -10,6 +10,7 @@ import (
 var record string
 
 func handler(w dns.ResponseWriter, r *dns.Msg) {
+	slog.Info("DNS", "question", fmt.Sprintf("%+v", r.Question))
 	m := new(dns.Msg).SetReply(r)
 
 	for _, q := range m.Question {

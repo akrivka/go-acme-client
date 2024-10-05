@@ -404,6 +404,7 @@ func main() {
 	shutdownServer := &http.Server{
 		Addr: opts.IPV4Address + ":5003",
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// WARNING: Exiting like this is nasty... but alas it works for the tests
 			os.Exit(1)
 		}),
 	}

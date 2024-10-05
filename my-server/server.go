@@ -26,6 +26,7 @@ func RunServer(record string, certPEM []byte, keyPEM []byte) {
 			Certificates: []tls.Certificate{cert},
 		},
 	}
+	slog.Info("Listening at ", "addr", record+":5001")
 	if err := Server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		slog.Error("Could not start my-server", "err", err)
 	}
