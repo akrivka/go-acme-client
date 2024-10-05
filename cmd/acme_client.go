@@ -176,7 +176,7 @@ func doAcmePost(url string, payload any, desiredStatus int) ([]byte, string, err
 		if err != nil {
 			return nil, "", fmt.Errorf("failed to read problem document (%s)", err.Error())
 		} else {
-			slog.Error("ACME problem", "type", acmeProblem.Type, "detail", acmeProblem.Detail)
+			slog.Error("ACME problem", "type", acmeProblem.Type, "detail", acmeProblem.Detail, "subproblems", fmt.Sprintf("%+v", acmeProblem.Subproblems))
 			return nil, "", errors.New("logged ACME problem")
 		}
 	}
@@ -198,7 +198,7 @@ func obtainCertificate() error {
 	// Create new accountUrl
 	_, accountUrl, err := doAcmePost(
 		server.Directory.NewAccount,
-		ACMEMsg_NewAccount{true, []string{"mailto:akrivka@student.ethz.ch"}},
+		ACMEMsg_NewAccount{true, []string{"mailto:" + MyEmailAddress}},
 		http.StatusCreated)
 	if err != nil {
 		return fmt.Errorf("failed to create new account (%s)", err.Error())
@@ -309,10 +309,51 @@ func obtainCertificate() error {
 		return fmt.Errorf("all authzs were valid but somehow order wasn't ready ;(")
 	}
 
-	slog.Info("Order is ready!")
+	slog.Info("Order is ready! Finalizing it...")
 
 	// Finalize order
-	// TODO
+	csr, _, err := generateCsr(opts.Domains)
+	if err != nil {
+		return fmt.Errorf("failed to generate csr (%s)", err)
+	}
+	resBody, _, err = doAcmePost(
+		order.Finalize,
+		ACMEMsg_Finalize{base64url(csr)},
+		http.StatusOK)
+	if err != nil {
+		return fmt.Errorf("failed to finalize order (%s)", err)
+	}
+
+	for order.Status != "valid" {
+		// Sleep for one second first
+		time.Sleep(1 * time.Second)
+
+		// Check order
+		resBody, _, err = doAcmePost(
+			orderUrl,
+			"",
+			http.StatusOK)
+		if err != nil {
+			return fmt.Errorf("failed to check order (%s)", err.Error())
+		}
+		err = json.Unmarshal(resBody, &order)
+		if err != nil {
+			return fmt.Errorf("failed to read order (%s)", err.Error())
+		}
+	}
+
+	slog.Info("Order is valid! Downloading certificate...")
+
+	// Download certificate
+	resBody, _, err = doAcmePost(
+		order.Certificate,
+		"",
+		http.StatusOK)
+	if err != nil {
+		return fmt.Errorf("failed to download certificate (%s)", err.Error())
+	}
+
+	fmt.Printf("%s\n", resBody)
 
 	return nil
 }

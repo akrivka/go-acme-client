@@ -13,6 +13,8 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
@@ -36,9 +38,10 @@ type RSAPublicKey struct {
 }
 
 // RS256 private-public key pair
-var jwkPrivate *rsa.PrivateKey
-var jwkPublic RSAPublicKey
-var jwkThumbprint string
+var accountPrivate *rsa.PrivateKey
+var accountPublic *rsa.PublicKey
+var accountJwk RSAPublicKey
+var accountThumbprint string
 
 // Account id
 var acmeKid string
@@ -61,26 +64,29 @@ type JWSProtected struct {
 
 // Generate a key pair
 func acmeJoseInit() {
-	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	_rsaPrivate, err := rsa.GenerateKey(rand.Reader, 2048)
 	panicIfError(err)
-	jwkPrivate = privateKey
+	accountPrivate = _rsaPrivate
+	accountPublic = &(accountPrivate.PublicKey)
 
-	//privateKey.PublicKey.E = 65537
+	// Generate jwk forms
 	bs := make([]byte, 4)
-	binary.BigEndian.PutUint32(bs, uint32(privateKey.PublicKey.E))
-	jwkPublic = RSAPublicKey{"RSA", base64url(privateKey.PublicKey.N.Bytes()), base64url(bytes.Trim(bs, "\x00"))}
+	binary.BigEndian.PutUint32(bs, uint32(accountPublic.E))
+	accountJwk = RSAPublicKey{"RSA", base64url(accountPublic.N.Bytes()), base64url(bytes.Trim(bs, "\x00"))}
 	var jwkPublicLexi struct {
 		E   string `json:"e"`
 		Kty string `json:"kty"`
 		N   string `json:"n"`
 	}
-	jwkPublicLexi.E = jwkPublic.E
-	jwkPublicLexi.Kty = jwkPublic.Kty
-	jwkPublicLexi.N = jwkPublic.N
+	jwkPublicLexi.E = accountJwk.E
+	jwkPublicLexi.Kty = accountJwk.Kty
+	jwkPublicLexi.N = accountJwk.N
 	jwkPublicJson, err := json.Marshal(jwkPublicLexi)
 	panicIfError(err)
+
+	// Generate thumbprint form
 	hashed := sha256.Sum256(jwkPublicJson)
-	jwkThumbprint = base64url(hashed[:])
+	accountThumbprint = base64url(hashed[:])
 }
 
 // Set account key id
@@ -102,7 +108,7 @@ func acmeJwsSign(payload []byte, url string, nonce string) ([]byte, error) {
 	if acmeKid == "" {
 		protected = JWSProtected{
 			Alg:   Alg,
-			Jwk:   &jwkPublic,
+			Jwk:   &accountJwk,
 			Nonce: nonce,
 			Url:   url,
 		}
@@ -122,7 +128,7 @@ func acmeJwsSign(payload []byte, url string, nonce string) ([]byte, error) {
 	// Compute signature
 	signingInput := fmt.Sprintf("%s.%s", base64url(protectedJson), payload64)
 	hashed := sha256.Sum256([]byte(signingInput))
-	signature, err := rsa.SignPKCS1v15(nil, jwkPrivate, crypto.SHA256, hashed[:])
+	signature, err := rsa.SignPKCS1v15(nil, accountPrivate, crypto.SHA256, hashed[:])
 	if err != nil {
 		return nil, err
 	}
@@ -138,5 +144,32 @@ func acmeJwsSign(payload []byte, url string, nonce string) ([]byte, error) {
 }
 
 func acmeKeyAuthz(token string) string {
-	return fmt.Sprintf("%s.%s", token, jwkThumbprint)
+	return fmt.Sprintf("%s.%s", token, accountThumbprint)
+}
+
+func generateCsr(domains []string) ([]byte, *rsa.PrivateKey, error) {
+	// Generate new private/public key pair
+	priv, err := rsa.GenerateKey(rand.Reader, 2048)
+	panicIfError(err)
+	pub := &(priv.PublicKey)
+
+	// Create csr
+	csrTemplate := x509.CertificateRequest{
+		Version: 0,
+
+		PublicKeyAlgorithm: x509.RSA,
+		PublicKey:          pub,
+
+		Subject: pkix.Name{
+			Country:      []string{MyCountry},
+			Organization: []string{MyOrganization},
+		},
+		EmailAddresses: []string{MyEmailAddress},
+
+		DNSNames: domains,
+	}
+	// Return certificate as well as the private key
+	// so that the client can install it in the appropriate http server
+	csr, err := x509.CreateCertificateRequest(rand.Reader, &csrTemplate, priv)
+	return csr, priv, err
 }
