@@ -31,9 +31,7 @@ func RunServer(record string, certPEM []byte, keyPEM []byte) {
 	}
 
 	slog.Info("(myserver) Listening at ", "addr", addr)
-	slog.Info("Listening at ", "addr", record+":5001")
-	if err := Server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		slog.Error("Could not start my-server", "err", err)
+	if err := Server.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
 		slog.Error("(myserver) Could not start my-server", "err", err)
 	}
 }
