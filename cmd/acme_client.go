@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
@@ -362,6 +363,18 @@ func obtainCertificates() ([]byte, []byte, error) {
 	return certPEM, keyPEM, nil
 }
 
+func revokeCertificates(certPEM []byte) error {
+	block, _ := pem.Decode(certPEM)
+	_, _, err := doAcmePost(
+		server.Directory.RevokeCert,
+		&ACMEMsg_Revoke{base64url(block.Bytes)},
+		http.StatusOK)
+	if err != nil {
+		return fmt.Errorf("failed to call revokeCert (%s)", err.Error())
+	}
+	return nil
+}
+
 func main() {
 	slog.Info("Starting the ACME client")
 
@@ -400,6 +413,15 @@ func main() {
 		os.Exit(1)
 	}
 	slog.Info("Certificates obtained!")
+
+	if opts.Revoke {
+		err = revokeCertificates(certPEM)
+		if err != nil {
+			slog.Error("Failed to revoke certificate", "error", err.Error())
+			os.Exit(1)
+		}
+		slog.Info("Certificates revoked ;(")
+	}
 
 	// Start Certificate HTTPS server
 	slog.Info("Starting HTTPS server with the certificates")

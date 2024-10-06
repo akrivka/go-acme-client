@@ -24,6 +24,10 @@ type ACMEMsg_Finalize struct {
 	CSR string `json:"csr"`
 }
 
+type ACMEMsg_Revoke struct {
+	Certificate string `json:"certificate"`
+}
+
 // RESPONSES
 type ACMEProblem struct {
 	Type        string `json:"type"`
