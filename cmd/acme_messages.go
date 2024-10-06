@@ -46,5 +46,6 @@ type ACMEChallenge struct {
 
 type ACMEAuthorization struct {
 	Status     string          `json:"status"`
+	Identifier ACMEIdentifier  `json:"identifier"`
 	Challenges []ACMEChallenge `json:"challenges"`
 }

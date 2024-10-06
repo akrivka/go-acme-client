@@ -7,15 +7,15 @@ import (
 	"strings"
 )
 
-const prefix = "/.well-known/acme-challenge/"
+const Prefix = "/.well-known/acme-challenge/"
 
 var challResources map[string]string
 
 var validReceived chan bool
 
 func handler(w http.ResponseWriter, r *http.Request) {
-	if strings.HasPrefix(r.URL.Path, prefix) {
-		var token = r.URL.Path[len(prefix):]
+	if strings.HasPrefix(r.URL.Path, Prefix) {
+		var token = r.URL.Path[len(Prefix):]
 		if keyAuthz := challResources[token]; keyAuthz != "" {
 			w.WriteHeader(http.StatusOK)
 			io.WriteString(w, keyAuthz)
@@ -32,12 +32,12 @@ func InstallResource(token string, keyAuthz string) {
 
 var Server *http.Server
 
-func HTTP01(record string, _validReceived chan bool) {
-	challResources = make(map[string]string)
+func HTTP01(addr string, _validReceived chan bool) {
 	validReceived = _validReceived
+	challResources = make(map[string]string)
 
 	Server = &http.Server{
-		Addr:    record + ":5002",
+		Addr:    addr + ":5002",
 		Handler: http.HandlerFunc(handler),
 	}
 	if err := Server.ListenAndServe(); err != nil && err != http.ErrServerClosed {

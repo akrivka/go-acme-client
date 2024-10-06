@@ -251,7 +251,12 @@ func obtainCertificates() ([]byte, []byte, error) {
 				numChall += 1
 
 				// Provision key authorizaiton in appropriate challenge server
-				http01.InstallResource(chall.Token, acmeKeyAuthz(chall.Token))
+				switch opts.ChallengeType {
+				case ChallengeHTTP01:
+					http01.InstallResource(chall.Token, acmeKeyAuthz(chall.Token))
+				case ChallengeDNS01:
+					dns01.InstallResource(authz.Identifier.Value, acmeKeyAuthz(chall.Token))
+				}
 
 				_, _, err := doAcmePost(
 					chall.Url,
@@ -383,7 +388,7 @@ func main() {
 	validReceived = make(chan bool, 20)
 
 	go http01.HTTP01(opts.IPV4Address, validReceived)
-	go dns01.DNS01(opts.IPV4Address)
+	go dns01.DNS01(opts.IPV4Address, validReceived)
 
 	// Wait a little bit for the servers to start...
 	time.Sleep(1 * time.Second)
