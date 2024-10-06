@@ -397,7 +397,7 @@ func main() {
 	slog.Info("Certificates obtained!")
 
 	// Start Certificate HTTPS server
-	slog.Info("Starting Certificate HTTPS")
+	slog.Info("Starting HTTPS server with the certificates")
 	go myserver.RunServer(opts.IPV4Address, certPEM, keyPEM)
 
 	// Start shutdown server

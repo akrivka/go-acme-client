@@ -41,6 +41,6 @@ func HTTP01(record string, _validReceived chan bool) {
 		Handler: http.HandlerFunc(handler),
 	}
 	if err := Server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		slog.Error("Could not start http01 server", "err", err)
+		slog.Error("(http01) Could not start http01 server", "err", err)
 	}
 }
