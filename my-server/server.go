@@ -26,6 +26,7 @@ func RunServer(record string, certPEM []byte, keyPEM []byte) {
 		Addr:    addr,
 		Handler: http.HandlerFunc(handler),
 		TLSConfig: &tls.Config{
+			MinVersion:   tls.VersionTLS12,
 			Certificates: []tls.Certificate{cert},
 		},
 	}
