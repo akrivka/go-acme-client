@@ -65,7 +65,7 @@ type JWSProtected struct {
 
 // Generate a key pair
 func acmeJoseInit() {
-	_rsaPrivate, err := rsa.GenerateKey(rand.Reader, 2048)
+	_rsaPrivate, err := rsa.GenerateKey(rand.Reader, 3072)
 	panicIfError(err)
 	accountPrivate = _rsaPrivate
 	accountPublic = &(accountPrivate.PublicKey)
@@ -129,7 +129,7 @@ func acmeJwsSign(payload []byte, url string, nonce string) ([]byte, error) {
 	// Compute signature
 	signingInput := fmt.Sprintf("%s.%s", base64url(protectedJson), payload64)
 	hashed := sha256.Sum256([]byte(signingInput))
-	signature, err := rsa.SignPKCS1v15(nil, accountPrivate, crypto.SHA256, hashed[:])
+	signature, err := rsa.SignPKCS1v15(rand.Reader, accountPrivate, crypto.SHA256, hashed[:])
 	if err != nil {
 		return nil, err
 	}
@@ -150,7 +150,7 @@ func acmeKeyAuthz(token string) string {
 
 func generateCsr(domains []string) ([]byte, []byte, error) {
 	// Generate new private/public key pair
-	priv, err := rsa.GenerateKey(rand.Reader, 2048)
+	priv, err := rsa.GenerateKey(rand.Reader, 3072)
 	panicIfError(err)
 	pub := &(priv.PublicKey)
 
