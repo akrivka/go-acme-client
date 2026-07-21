@@ -100,7 +100,8 @@ func initHttpClient() error {
 	client = &http.Client{
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{
-				RootCAs: serverCACertPool,
+				RootCAs:    serverCACertPool,
+				MinVersion: tls.VersionTLS13,
 			},
 		},
 	}
