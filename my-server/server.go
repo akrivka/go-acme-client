@@ -15,6 +15,17 @@ func handler(w http.ResponseWriter, r *http.Request) {
 
 var Server *http.Server
 
+func newServer(addr string, cert tls.Certificate) *http.Server {
+	return &http.Server{
+		Addr:    addr,
+		Handler: http.HandlerFunc(handler),
+		TLSConfig: &tls.Config{
+			Certificates: []tls.Certificate{cert},
+			MinVersion:   tls.VersionTLS13,
+		},
+	}
+}
+
 func RunServer(record string, certPEM []byte, keyPEM []byte) {
 	cert, err := tls.X509KeyPair(certPEM, keyPEM)
 	if err != nil {
@@ -22,13 +33,7 @@ func RunServer(record string, certPEM []byte, keyPEM []byte) {
 	}
 
 	addr := record + ":5001"
-	Server = &http.Server{
-		Addr:    addr,
-		Handler: http.HandlerFunc(handler),
-		TLSConfig: &tls.Config{
-			Certificates: []tls.Certificate{cert},
-		},
-	}
+	Server = newServer(addr, cert)
 
 	slog.Info("(myserver) Listening at ", "addr", addr)
 	if err := Server.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
