@@ -25,6 +25,12 @@ func TestHandler_ServesChallenge(t *testing.T) {
     if res.StatusCode != http.StatusOK {
         t.Fatalf("status code = %d, want %d", res.StatusCode, http.StatusOK)
     }
+    if got := res.Header.Get("Content-Type"); got != "text/plain; charset=utf-8" {
+        t.Fatalf("content type = %q, want %q", got, "text/plain; charset=utf-8")
+    }
+    if got := res.Header.Get("X-Content-Type-Options"); got != "nosniff" {
+        t.Fatalf("x-content-type-options = %q, want %q", got, "nosniff")
+    }
     body, _ := io.ReadAll(res.Body)
     if string(body) != keyAuthz {
         t.Fatalf("body = %s, want %s", string(body), keyAuthz)

@@ -1,7 +1,6 @@
 package http01
 
 import (
-	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -17,8 +16,10 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	if strings.HasPrefix(r.URL.Path, Prefix) {
 		var token = r.URL.Path[len(Prefix):]
 		if keyAuthz := challResources[token]; keyAuthz != "" {
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			w.Header().Set("X-Content-Type-Options", "nosniff")
 			w.WriteHeader(http.StatusOK)
-			io.WriteString(w, keyAuthz)
+			_, _ = w.Write([]byte(keyAuthz))
 			validReceived <- true
 		} else {
 			w.WriteHeader(http.StatusNotFound)
